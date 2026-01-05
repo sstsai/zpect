@@ -1,0 +1,19 @@
+{
+  "general": {
+    "preferredEditor": "code-insiders",
+    "checkpointing": {
+      "enabled": true
+    },
+    "contextFileName": ["AGENTS.md", "GEMINI.md"]
+  },
+  "fileFiltering": {
+    "respectGitIgnore": true,
+    "enableRecursiveFileSearch": true
+  },
+  "coreTools": [
+    "ReadFileTool",
+    "WriteFileTool",
+    "ShellTool(ls, zig build, zig test, gh)",
+    "GlobTool"
+  ]
+}
