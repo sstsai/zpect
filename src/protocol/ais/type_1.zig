@@ -1,6 +1,6 @@
 const std = @import("std");
-const codec = @import("../codec/codecs.zig");
-const types = @import("../codec/types.zig");
+const codec = @import("../../codec/bit_packed.zig");
+const types = @import("../../meta/schema.zig");
 
 // Import generic types
 const U = types.U;
@@ -48,7 +48,7 @@ pub const MsgType1 = struct {
 
 test "MsgType1 encode/decode" {
     // 168 bits
-    var writer = try @import("../codec/bit_stream.zig").BitWriter.init(std.testing.allocator);
+    var writer = try @import("../../codec/bit_stream.zig").BitWriter.init(std.testing.allocator);
     defer writer.deinit();
 
     // Fill with dummy data
@@ -78,7 +78,7 @@ test "MsgType1 encode/decode" {
 
     try std.testing.expectEqual(bits.len, 168);
 
-    var reader = @import("../codec/bit_stream.zig").BitReader{ .bits = bits };
+    var reader = @import("../../codec/bit_stream.zig").BitReader{ .bits = bits };
     const decoded = try codec.decodeStruct(MsgType1Schema, MsgType1, &reader);
 
     try std.testing.expectEqual(msg.mmsi, decoded.mmsi);

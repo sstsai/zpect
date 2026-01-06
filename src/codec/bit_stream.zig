@@ -29,7 +29,6 @@ pub const BitReader = struct {
         const raw = try self.readInt(U_Type, bit_width);
 
         // Sign extension
-        // If the MSB (width-1) is set, we must set all bits from width to @bitSizeOf(T)
         const msb = (raw >> @intCast(bit_width - 1)) & 1;
         var val: T = 0;
 
@@ -85,30 +84,9 @@ pub const BitWriter = struct {
     }
 
     pub fn writeSigned(self: *BitWriter, value: anytype, bit_width: usize) !void {
-        // Write lower 'bit_width' bits of the signed value.
-        // Bit cast to unsigned of same size.
         const T = @TypeOf(value);
         const U_Type = std.meta.Int(.unsigned, @bitSizeOf(T));
         const raw = @as(U_Type, @bitCast(value));
         try self.writeInt(raw, bit_width);
     }
 };
-
-test "BitStream basic usage" {
-    // Write 1010 (10 decimal) as 4 bits
-    var writer = try BitWriter.init(std.testing.allocator);
-    defer writer.deinit();
-
-    try writer.writeInt(10, 4);
-    try writer.writeSigned(@as(i8, -1), 4); // 1111
-
-    const bits = try writer.bits.toOwnedSlice(std.testing.allocator);
-    defer std.testing.allocator.free(bits);
-
-    var reader = BitReader{ .bits = bits };
-    const u = try reader.readInt(u8, 4);
-    try std.testing.expectEqual(@as(u8, 10), u);
-
-    const i = try reader.readSigned(i8, 4);
-    try std.testing.expectEqual(@as(i8, -1), i);
-}

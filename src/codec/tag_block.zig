@@ -1,17 +1,6 @@
 const std = @import("std");
 
 pub const TagBlock = struct {
-    // For now, we store raw key-value pairs as slices.
-    // In a real system, we might want a hash map or specific fields.
-    // Given the constraints, a simple iterator or list of pairs is good.
-    // But we need to return something usable.
-    // Let's store the raw text of the tag block content for further parsing if needed,
-    // or parse into a simple HashMap-like structure if allocator is provided.
-
-    // Minimal implementation: Just validate and strip.
-    // But user asked to "handle" it.
-    // Let's provide an iterator over tags.
-
     raw_content: []const u8, // Content inside \...\ excluding checksum
 
     pub const TagIterator = struct {
@@ -52,10 +41,6 @@ pub fn parse(line: []const u8) !struct { tag_block: ?TagBlock, rest: []const u8 
 
     // The tag block ends with \ which should be at end_marker + 3
     if (line[end_marker + 3] != '\\') {
-         // Maybe it continues?
-         // "ends with a checksum like *hh, and is immediately followed by..."
-         // The standard says: \g:1-2-3*hh\$...
-         // So it ends with \
          return error.InvalidTagBlock;
     }
 

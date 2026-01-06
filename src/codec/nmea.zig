@@ -28,24 +28,14 @@ pub const NmeaFrame = struct {
         const content = line[start+1..end];
 
         // Split into fields
-        // Note: std.ArrayList(T).init(allocator) seems missing in this Zig version for Aligned/ArrayList?
-        // Using initCapacity(allocator, 0) works or just manual init.
-        // Actually, ArrayList.init might have been removed in favor of ArrayList.init(allocator)
-        // Wait, I saw init(gpa: Allocator) at line 44, but that was for Unmanaged? Or something else?
-        // The error says "struct ... has no member named 'init'".
-        // But grep showed it.
-        // Ah, grep showed it at line 44. But Aligned struct starts at 576.
-        // So Aligned (which ArrayList uses) does NOT have init?
-        // It has initCapacity.
-        // Let's use initCapacity(allocator, 8) as a guess.
+        // Note: In this Zig Master version, std.ArrayList is effectively unmanaged and requires
+        // the allocator to be passed to methods like append/deinit.
 
         var fields = try std.ArrayList([]const u8).initCapacity(allocator, 8);
         errdefer fields.deinit(allocator);
 
         var it = std.mem.splitScalar(u8, content, ',');
         while (it.next()) |field| {
-            // Note: In this Zig Master version, std.ArrayList is effectively unmanaged and requires
-            // the allocator to be passed to methods like append/deinit.
             try fields.append(allocator, field);
         }
 

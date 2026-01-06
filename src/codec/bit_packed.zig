@@ -1,6 +1,6 @@
 const std = @import("std");
 const bit_stream = @import("bit_stream.zig");
-const types = @import("types.zig");
+const types = @import("../meta/schema.zig");
 
 const BitReader = bit_stream.BitReader;
 const BitWriter = bit_stream.BitWriter;

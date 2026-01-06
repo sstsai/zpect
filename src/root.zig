@@ -2,20 +2,20 @@
 const std = @import("std");
 
 pub const protocol = struct {
-    pub const tag_block = @import("protocol/tag_block.zig");
-    pub const nmea = @import("protocol/nmea.zig");
-    pub const sixbit = @import("protocol/sixbit.zig");
     pub const ais = @import("protocol/ais.zig");
-
-    // Expose internal codec layers for advanced usage or testing?
+    // Codecs are internals, but exposed for advanced usage if needed.
     pub const codec = struct {
-        pub const bit_stream = @import("protocol/codec/bit_stream.zig");
-        pub const types = @import("protocol/codec/types.zig");
-        pub const codecs = @import("protocol/codec/codecs.zig");
+        pub const bit_stream = @import("codec/bit_stream.zig");
+        pub const bit_packed = @import("codec/bit_packed.zig");
+        pub const nmea = @import("codec/nmea.zig");
+        pub const tag_block = @import("codec/tag_block.zig");
+        pub const ais_sixbit = @import("codec/ais_sixbit.zig");
     };
 
-    // Legacy export for ais_types (now under codec) - remove or alias?
-    // Let's remove ais_types as it was requested to be broken up.
+    // Convenience aliases
+    pub const tag_block = codec.tag_block;
+    pub const nmea = codec.nmea;
+    pub const sixbit = codec.ais_sixbit;
 };
 
 pub fn add(a: i32, b: i32) i32 {
@@ -27,11 +27,10 @@ test "basic add functionality" {
 }
 
 test "protocol modules" {
-    _ = protocol.tag_block;
-    _ = protocol.nmea;
-    _ = protocol.sixbit;
     _ = protocol.ais;
     _ = protocol.codec.bit_stream;
-    _ = protocol.codec.types;
-    _ = protocol.codec.codecs;
+    _ = protocol.codec.bit_packed;
+    _ = protocol.codec.nmea;
+    _ = protocol.codec.tag_block;
+    _ = protocol.codec.ais_sixbit;
 }
