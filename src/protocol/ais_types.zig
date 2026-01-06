@@ -22,6 +22,33 @@ pub const BitReader = struct {
         self.cursor += bit_width;
         return result;
     }
+
+    pub fn readSigned(self: *BitReader, comptime T: type, bit_width: usize) !T {
+        // Read as unsigned container of same size
+        const U_Type = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const raw = try self.readInt(U_Type, bit_width);
+
+        // Sign extension
+        // If the MSB (width-1) is set, we must set all bits from width to @bitSizeOf(T)
+        const msb = (raw >> @intCast(bit_width - 1)) & 1;
+        var val: T = 0;
+
+        if (msb == 1) {
+            // Negative
+            var mask: U_Type = 0;
+            if (bit_width == @bitSizeOf(T)) {
+                mask = std.math.maxInt(U_Type);
+            } else {
+                mask = (@as(U_Type, 1) << @intCast(bit_width)) - 1;
+            }
+            const sign_ext = ~mask;
+            const extended = raw | sign_ext;
+            val = @bitCast(extended);
+        } else {
+            val = @intCast(raw);
+        }
+        return val;
+    }
 };
 
 pub const BitWriter = struct {
@@ -44,26 +71,9 @@ pub const BitWriter = struct {
         // MSB first
         for (0..bit_width) |i| {
             const shift_amt = bit_width - 1 - i;
-            // Ensure shift_amt is treated as a runtime integer suitable for shifting.
-            // We use @intCast which should work if value type is determined.
-            // The issue might be that `value` is `anytype` and inferred as `comptime_int` in some calls,
-            // making the compiler expect `shift_amt` to be `comptime_int`.
-
-            // Force value to be a runtime integer if possible?
-            // Or explicitly cast shift_amt to u6 or log2 type?
-            // If value is u128, shift can be u7.
-
-            // Let's deduce the type of shift amount needed for @TypeOf(value).
+            // Handle comptime_int vs runtime int
             const ValueType = @TypeOf(value);
-            // If ValueType is comptime_int, we have a problem if shift_amt is runtime.
-
-            // Solution: If value is comptime_int, we should cast it to a large enough runtime integer first?
-            // But we don't know the max size needed.
-            // However, typical usage passes explicit types from `encode`.
-            // But the test passes literals `try writer.writeInt(5, 6)`. 5 is comptime_int.
-
             if (@typeInfo(ValueType) == .comptime_int) {
-                // Cast to u128 to handle up to 128 bits?
                 const v_u128: u128 = @intCast(value);
                 const bit_val = (v_u128 >> @intCast(shift_amt)) & 1;
                 try self.bits.append(self.allocator, @intCast(bit_val));
@@ -73,105 +83,46 @@ pub const BitWriter = struct {
             }
         }
     }
+
+    pub fn writeSigned(self: *BitWriter, value: anytype, bit_width: usize) !void {
+        // Write lower 'bit_width' bits of the signed value.
+        // Bit cast to unsigned of same size.
+        const T = @TypeOf(value);
+        const U_Type = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const raw = @as(U_Type, @bitCast(value));
+        try self.writeInt(raw, bit_width);
+    }
 };
 
-/// Generic Unsigned Integer Type
+// --- Types ---
+
+/// Unsigned Integer Type
 pub fn U(comptime width: usize, comptime T: type) type {
     return struct {
         value: T,
-
-        const Self = @This();
-        pub const bit_width = width;
-
-        pub fn decode(reader: *BitReader) !Self {
-            const val = try reader.readInt(T, width);
-            return Self{ .value = val };
-        }
-
-        pub fn encode(self: Self, writer: *BitWriter) !void {
-            try writer.writeInt(self.value, width);
-        }
+        pub const bits = width;
+        pub const signed = false;
+        pub const Underlying = T;
     };
 }
 
-/// Generic Signed Integer Type
+/// Signed Integer Type
 pub fn I(comptime width: usize, comptime T: type) type {
     return struct {
         value: T,
-
-        const Self = @This();
-        pub const bit_width = width;
-
-        pub fn decode(reader: *BitReader) !Self {
-            // Read as unsigned then cast/extend
-            // We use a container unsigned type of same size as T
-            const U_Type = std.meta.Int(.unsigned, @bitSizeOf(T));
-            const raw = try reader.readInt(U_Type, width);
-
-            // Sign extension
-            // If the MSB (width-1) is set, we must set all bits from width to @bitSizeOf(T)
-            const msb = (raw >> (width - 1)) & 1;
-            var val: T = 0;
-
-            if (msb == 1) {
-                // Negative
-                // Create mask for lower 'width' bits
-                // If width is same as T bitsize, we can't shift by width.
-                // But U(8, i8): width=8. bitSizeOf(i8)=8.
-                // 1 << 8 is UB for u8.
-                // If width == @bitSizeOf(T), we don't need sign extension (it's already correct size).
-                var mask: U_Type = 0;
-                if (width == @bitSizeOf(T)) {
-                    mask = std.math.maxInt(U_Type);
-                } else {
-                    mask = (@as(U_Type, 1) << @intCast(width)) - 1;
-                }
-
-                const sign_ext = ~mask;
-                // Combine
-                const extended = raw | sign_ext;
-                val = @bitCast(extended);
-            } else {
-                val = @intCast(raw);
-            }
-
-            return Self{ .value = val };
-        }
-
-        pub fn encode(self: Self, writer: *BitWriter) !void {
-            // Write strictly the lower 'width' bits
-            try writer.writeInt(@as(std.meta.Int(.unsigned, @bitSizeOf(T)), @bitCast(self.value)), width);
-        }
+        pub const bits = width;
+        pub const signed = true;
+        pub const Underlying = T;
     };
 }
 
 /// Coordinate (Latitude/Longitude)
-/// Reads signed integer of `width`, converts to degrees (1/10000 minute precision).
 pub fn LatLon(comptime width: usize) type {
     return struct {
         value: f64,
-
-        const Self = @This();
-        pub const bit_width = width;
-
-        pub fn decode(reader: *BitReader) !Self {
-            // Use the I() logic to get the integer
-            const IntType = I(width, i32); // Assuming i32 is enough for u28/u27
-            const int_val = (try IntType.decode(reader)).value;
-
-            // Convert to degrees
-            const deg = @as(f64, @floatFromInt(int_val)) / 10000.0 / 60.0;
-            return Self{ .value = deg };
-        }
-
-        pub fn encode(self: Self, writer: *BitWriter) !void {
-            // Convert degrees back to 1/10000 minutes
-            const mins = self.value * 60.0 * 10000.0;
-            const int_val = @as(i32, @intFromFloat(mins));
-
-            const IntType = I(width, i32);
-            try (IntType{ .value = int_val }).encode(writer);
-        }
+        pub const bits = width;
+        pub const scale = 600000.0;
+        pub const Underlying = f64;
     };
 }
 
@@ -184,9 +135,8 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
         const Self = @This();
 
         pub fn init(len: usize) Self {
-             // Init buffer to undefined or 0
              return Self{
-                 .buffer = [_]T{0} ** capacity, // Init with 0
+                 .buffer = [_]T{0} ** capacity,
                  .len = len,
              };
         }
@@ -208,48 +158,102 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
 }
 
 /// AIS String
-/// Fixed bit width, 6 bits per char.
 pub fn Str(comptime bit_len: usize) type {
     const char_count = bit_len / 6;
     return struct {
         value: BoundedArray(u8, char_count),
-
-        const Self = @This();
-        pub const bit_width = bit_len;
-
-        pub fn decode(reader: *BitReader) !Self {
-            // Read char by char.
-            var ba = BoundedArray(u8, char_count).init(0);
-
-            for (0..char_count) |_| {
-                const char_code = try reader.readInt(u8, 6);
-                const ascii = if (char_code < 32) (char_code + 64) else (char_code);
-                try ba.append(ascii);
-            }
-
-            // Trim @ and space
-            const trimmed = std.mem.trimEnd(u8, ba.slice(), "@ ");
-            ba.len = @intCast(trimmed.len);
-
-            return Self{ .value = ba };
-        }
-
-        pub fn encode(self: Self, writer: *BitWriter) !void {
-            // Encode chars
-            for (self.value.constSlice()) |c| {
-                var code: u8 = c;
-                if (c >= 64) {
-                    code = c - 64;
-                }
-                // Check valid range?
-                try writer.writeInt(code & 0x3F, 6);
-            }
-            // Padding
-            const padding = char_count - self.value.len;
-            for (0..padding) |_| {
-                // @ -> 0
-                try writer.writeInt(0, 6);
-            }
-        }
+        pub const bits = bit_len;
+        pub const is_string = true;
+        pub const Underlying = BoundedArray(u8, char_count);
     };
 }
+
+// --- Codecs ---
+
+pub const IntCodec = struct {
+    pub fn encode(comptime T: type, value: T, w: *BitWriter) !void {
+        const bits = @field(T, "bits");
+        if (@field(T, "signed")) {
+            try w.writeSigned(value.value, bits);
+        } else {
+            try w.writeInt(value.value, bits);
+        }
+    }
+
+    pub fn decode(comptime T: type, r: *BitReader) !T {
+        const bits = @field(T, "bits");
+        const Underlying = @field(T, "Underlying");
+        if (@field(T, "signed")) {
+            const val = try r.readSigned(Underlying, bits);
+            return T{ .value = val };
+        } else {
+            const val = try r.readInt(Underlying, bits);
+            return T{ .value = val };
+        }
+    }
+};
+
+pub const ScaledFloatCodec = struct {
+    pub fn encode(comptime T: type, value: T, w: *BitWriter) !void {
+        const bits = @field(T, "bits");
+        const scale = @field(T, "scale");
+        // We need an int type large enough to hold bits
+        // Let's use i32 as standard for lat/lon (27/28 bits)
+        const Int = i32;
+
+        const scaled = value.value * scale;
+        const raw = @as(Int, @intFromFloat(@round(scaled)));
+        try w.writeSigned(raw, bits);
+    }
+
+    pub fn decode(comptime T: type, r: *BitReader) !T {
+        const bits = @field(T, "bits");
+        const scale = @field(T, "scale");
+        const Int = i32; // Assuming fit
+
+        const raw = try r.readSigned(Int, bits);
+        const deg = @as(f64, @floatFromInt(raw)) / scale;
+        return T{ .value = deg };
+    }
+};
+
+pub const StringCodec = struct {
+    pub fn encode(comptime T: type, value: T, w: *BitWriter) !void {
+        const bit_len = @field(T, "bits");
+        const char_count = bit_len / 6;
+
+        // Encode chars
+        for (value.value.constSlice()) |c| {
+            var code: u8 = c;
+            if (c >= 64) {
+                code = c - 64;
+            }
+            try w.writeInt(code & 0x3F, 6);
+        }
+        // Padding
+        const padding = char_count - value.value.len;
+        for (0..padding) |_| {
+            try w.writeInt(0, 6);
+        }
+    }
+
+    pub fn decode(comptime T: type, r: *BitReader) !T {
+        const bit_len = @field(T, "bits");
+        const char_count = bit_len / 6;
+        const Underlying = @field(T, "Underlying");
+
+        var ba = Underlying.init(0);
+
+        for (0..char_count) |_| {
+            const char_code = try r.readInt(u8, 6);
+            const ascii = if (char_code < 32) (char_code + 64) else (char_code);
+            try ba.append(ascii);
+        }
+
+        // Trim @ and space
+        const trimmed = std.mem.trimEnd(u8, ba.slice(), "@ ");
+        ba.len = @intCast(trimmed.len);
+
+        return T{ .value = ba };
+    }
+};

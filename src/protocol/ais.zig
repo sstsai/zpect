@@ -7,9 +7,6 @@ const I = types.I;
 const LatLon = types.LatLon;
 const Str = types.Str;
 
-// Note: These structs are NOT packed. They are standard structs wrapping the codec types.
-// The memory layout is native, but they know how to encode/decode themselves from bits.
-
 pub const MsgType1 = struct {
     message_id: U(6, u8),
     repeat_indicator: U(2, u8),
@@ -61,9 +58,6 @@ pub fn decode(bits: []const u1) !AisMessage {
     var reader = types.BitReader{ .bits = bits };
 
     // Peek Message ID (first 6 bits)
-    // We can read it and reset or just read.
-    // MsgType structs include message_id as first field.
-    // So we can just peek.
     const msg_id = try reader.readInt(u8, 6);
     reader.cursor = 0; // Reset
 
@@ -75,10 +69,6 @@ pub fn decode(bits: []const u1) !AisMessage {
             @memcpy(padded_bits[0..copy_len], bits[0..copy_len]);
 
             var padded_reader = types.BitReader{ .bits = &padded_bits };
-            // Ensure we skip first 6 bits if we peeked?
-            // Wait, we peeked msg_id but reader.cursor=0.
-            // padded_reader cursor is 0.
-
             return AisMessage{ .type1 = try decodeStruct(MsgType1, &padded_reader) };
         },
         5 => {
@@ -102,12 +92,6 @@ pub fn encode(message: AisMessage, allocator: std.mem.Allocator) ![]const u1 {
         .type5 => |msg| try encodeStruct(msg, &writer),
     }
 
-    // Return slice. The writer owns the memory so we probably need to handle ownership.
-    // BitWriter.deinit frees it.
-    // Let's return the slice and expect caller to free?
-    // BitWriter uses ArrayList. toOwnedSlice?
-    // BitWriter wraps ArrayList(u1).
-    // Let's add toOwnedSlice to BitWriter or expose bits.
     return try writer.bits.toOwnedSlice(allocator);
 }
 
@@ -116,9 +100,17 @@ fn decodeStruct(comptime T: type, reader: *types.BitReader) !T {
 
     // Iterate over fields and decode each
     inline for (std.meta.fields(T)) |field| {
-        // field.type must implement decode(reader)
-        const val = try field.type.decode(reader);
-        @field(result, field.name) = val;
+        const F = field.type;
+
+        if (@hasDecl(F, "scale")) {
+            @field(result, field.name) = try types.ScaledFloatCodec.decode(F, reader);
+        } else if (@hasDecl(F, "is_string")) {
+            @field(result, field.name) = try types.StringCodec.decode(F, reader);
+        } else if (@hasDecl(F, "signed")) {
+            @field(result, field.name) = try types.IntCodec.decode(F, reader);
+        } else {
+            @compileError("No codec for field " ++ field.name);
+        }
     }
 
     return result;
@@ -128,6 +120,16 @@ fn encodeStruct(value: anytype, writer: *types.BitWriter) !void {
     const T = @TypeOf(value);
     inline for (std.meta.fields(T)) |field| {
         const field_val = @field(value, field.name);
-        try field_val.encode(writer);
+        const F = field.type;
+
+        if (@hasDecl(F, "scale")) {
+            try types.ScaledFloatCodec.encode(F, field_val, writer);
+        } else if (@hasDecl(F, "is_string")) {
+            try types.StringCodec.encode(F, field_val, writer);
+        } else if (@hasDecl(F, "signed")) {
+            try types.IntCodec.encode(F, field_val, writer);
+        } else {
+            @compileError("No codec for field " ++ field.name);
+        }
     }
 }
