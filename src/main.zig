@@ -5,7 +5,7 @@ const tag_block = zpect.protocol.tag_block;
 const nmea = zpect.protocol.nmea;
 const sixbit = zpect.protocol.sixbit;
 const ais = zpect.protocol.ais;
-const ais_types = zpect.protocol.ais_types;
+const codec = zpect.protocol.codec;
 
 pub fn main() !void {
     std.debug.print("Zpect Maritime Telemetry System\n", .{});
@@ -49,18 +49,8 @@ test "pipeline with tag block and AIS" {
 }
 
 test "AIS Type 5 semantic access (Mock)" {
-    // Mock generic struct
-    // We cannot easily construct MsgType5 from thin air without setting all nested wrappers.
-    // But we can decode a mock bit stream.
-
-    // Construct bits for:
-    // MsgID (6) = 5
-    // ...
-    // CallSign (42) = "ABC    "
-    // VesselName (120) = "ZIG                    "
-
     // Using BitWriter to create the mock stream!
-    var writer = try ais_types.BitWriter.init(std.testing.allocator);
+    var writer = try codec.bit_stream.BitWriter.init(std.testing.allocator);
     defer writer.deinit();
 
     // Msg 5 Fields (Subset for test)
@@ -88,9 +78,8 @@ test "AIS Type 5 semantic access (Mock)" {
          try writer.writeInt(0, 6);
     }
 
-    // Rest of fields... fill with 0 to meet 424 bits length requirement?
-    // Current bit count: 6+2+30+2+30 + 42 + 120 = 232.
-    // Need 424.
+    // Fill remaining to 424 bits
+    // 6+2+30+2+30 + 42 + 120 = 232.
     const remaining = 424 - 232;
     for (0..remaining) |_| {
         try writer.bits.append(writer.allocator, 0);
@@ -112,7 +101,6 @@ test "AIS Type 5 semantic access (Mock)" {
 
 test "Round-trip Encoding" {
     // Decode -> Encode -> Decode -> Compare
-    // Use the Type 1 sample from previous test.
     const input = "\\s:source*54\\!AIVDM,1,1,,B,15MwkT1P37G?fl0EJbR0OwT0@MS,0*0E";
     const result = try tag_block.parse(input);
     const frame = try nmea.NmeaFrame.parse(std.testing.allocator, result.rest);
@@ -127,20 +115,6 @@ test "Round-trip Encoding" {
     // Encode back
     const encoded_bits = try ais.encode(msg1, std.testing.allocator);
     defer std.testing.allocator.free(encoded_bits);
-
-    // Compare bits
-    // Note: The original stream might have padding or length differences if our structs
-    // force fixed sizes (e.g. 168 bits) but input was short/padded.
-    // The previous implementation handled padding.
-    // The generic decoder reads exactly the struct size.
-    // So if original_bits had extra padding, they won't be in encoded_bits.
-    // Or if original was short, decoder might have failed (but we added padding logic).
-    // Let's compare the relevant length.
-
-    // MsgType1 is 168 bits.
-    // const len = @min(original_bits.len, encoded_bits.len);
-    // Actually we expect exact match for defined fields.
-    // Let's just check if it decodes back to same values.
 
     const msg2 = try ais.decode(encoded_bits);
 
