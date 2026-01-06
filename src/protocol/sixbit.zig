@@ -18,13 +18,15 @@ pub fn unarmor(input: []const u8, output_bits: []u1) !usize {
         }
 
         // Each char is 6 bits.
-        // MSB first? AIS is 6-bit ASCII. "The most significant bit is the first transmitted bit."
-        // We pack into u1 array.
+        // AIS data is transmitted MSB-first.
+        // "The most significant bit is the first transmitted bit."
+        // We pack into u1 array preserving this order (Index 0 = MSB).
 
         if (bit_index + 6 > output_bits.len) {
             return error.BufferTooSmall;
         }
 
+        // Extract bits from MSB (bit 5) to LSB (bit 0)
         output_bits[bit_index + 0] = @as(u1, @truncate(val >> 5));
         output_bits[bit_index + 1] = @as(u1, @truncate(val >> 4));
         output_bits[bit_index + 2] = @as(u1, @truncate(val >> 3));

@@ -12,6 +12,8 @@ pub const NmeaFrame = struct {
     // Let's keep it simple: specific parser for AIVDM, general for others.
 
     // For this task, we focus on AIVDM.
+    // To support other sentence types, add handling logic in `parse` or create
+    // separate parser functions delegated from here based on `sentence_type`.
 
     pub fn parse(allocator: std.mem.Allocator, line: []const u8) !NmeaFrame {
         // Validate checksum

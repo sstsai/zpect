@@ -87,13 +87,18 @@ fn castBits(comptime T: type, bits: []const u1) !T {
         var field_val: field.type = 0;
 
         // Extract bits for this field.
-        // We assume Big Endian bit stream (network order) into the integer value.
+        // AIS data is transmitted MSB-first (Network Bit Order).
+        // The bit stream `bits` is ordered such that index 0 is the first received bit (MSB of the first field).
+
+        // Zig `packed struct` layout is technically LSB-first in memory, but here we use the struct
+        // only as a schema to define field types and order. We manually construct the integer value
+        // for each field by shifting bits in from MSB to LSB.
 
         for (0..field_bits_len) |i| {
             if (bits[bit_offset + i] == 1) {
                 // Determine which bit in the integer this corresponds to.
-                // If the stream is MSB first, then the first bit we see is the MSB of the field.
-                // So bit `i` (0 to N-1) corresponds to bit `N-1-i` in the integer value.
+                // Since the stream is MSB first, the first bit we read (i=0) is the MSB of the field.
+                // So bit `i` (0 to N-1) corresponds to bit `N-1-i` in the constructed integer value.
                 field_val |= @as(field.type, 1) << @intCast(field_bits_len - 1 - i);
             }
         }
