@@ -5,6 +5,7 @@ const tag_block = zpect.protocol.tag_block;
 const nmea = zpect.protocol.nmea;
 const sixbit = zpect.protocol.sixbit;
 const ais = zpect.protocol.ais;
+const ais_types = zpect.protocol.ais_types;
 
 pub fn main() !void {
     std.debug.print("Zpect Maritime Telemetry System\n", .{});
@@ -35,10 +36,10 @@ test "pipeline with tag block and AIS" {
     switch (message) {
         .type1 => |msg| {
              // 366998416
-             try std.testing.expectEqual(@as(u32, 366998416), msg.mmsi);
+             try std.testing.expectEqual(@as(u32, 366998416), msg.mmsi.value);
              // Coordinates
-             const lat = msg.getLatitude();
-             const lon = msg.getLongitude();
+             const lat = msg.latitude.value;
+             const lon = msg.longitude.value;
              // Just verify they are reasonable floating point numbers (not NaN)
              try std.testing.expect(!std.math.isNan(lat));
              try std.testing.expect(!std.math.isNan(lon));
@@ -47,68 +48,112 @@ test "pipeline with tag block and AIS" {
     }
 }
 
-test "AIS Type 5 semantic access" {
-    // !AIVDM,2,1,0,A,542M8?@2<5?0l4=E:1000000000000000000000000000000000000000000,0*10
-    // !AIVDM,2,2,0,A,00000000000,2*23
-    // Combined payload needed for Type 5 usually.
-    // Let's use a single part Message 5 if possible? No, Msg 5 is long (424 bits > 360 bits in 1 sentence).
-    // It requires multi-part.
+test "AIS Type 5 semantic access (Mock)" {
+    // Mock generic struct
+    // We cannot easily construct MsgType5 from thin air without setting all nested wrappers.
+    // But we can decode a mock bit stream.
 
-    // My parser supports single sentence logic so far.
-    // I will mock the payload directly for this test to verify `getVesselName` and `getCallSign`.
+    // Construct bits for:
+    // MsgID (6) = 5
+    // ...
+    // CallSign (42) = "ABC    "
+    // VesselName (120) = "ZIG                    "
 
-    // Construct bits for a known Type 5 message.
-    // Or just manually populate the struct to test the accessors?
-    // Accessors work on the packed fields.
+    // Using BitWriter to create the mock stream!
+    var writer = try ais_types.BitWriter.init(std.testing.allocator);
+    defer writer.deinit();
 
-    var msg5 = ais.MsgType5{
-        .message_id = 5,
-        .repeat_indicator = 0,
-        .mmsi = 123456789,
-        .ais_version = 0,
-        .imo_number = 0,
-        .call_sign = 0, // Set below
-        .vessel_name = 0, // Set below
-        .ship_type = 0,
-        .dimension_to_bow = 0,
-        .dimension_to_stern = 0,
-        .dimension_to_port = 0,
-        .dimension_to_starboard = 0,
-        .position_fix_type = 0,
-        .eta = 0,
-        .draught = 0,
-        .destination = 0,
-        .dte = 0,
-        .spare = 0,
-    };
+    // Msg 5 Fields (Subset for test)
+    try writer.writeInt(5, 6); // message_id
+    try writer.writeInt(0, 2); // repeat
+    try writer.writeInt(123456789, 30); // mmsi
+    try writer.writeInt(0, 2); // version
+    try writer.writeInt(0, 30); // imo
 
-    // Set Call Sign "ABC"
-    // A=1, B=2, C=3.
-    // packed u42 (7 chars). MSB first.
-    // A(1) B(2) C(3) @(0) @(0) @(0) @(0)
-    // 000001 000010 000011 000000 ...
-    var cs: u42 = 0;
-    cs |= @as(u42, 1) << 36; // A
-    cs |= @as(u42, 2) << 30; // B
-    cs |= @as(u42, 3) << 24; // C
-    msg5.call_sign = cs;
+    // CallSign: "ABC" -> 1, 2, 3
+    try writer.writeInt(1, 6); // A
+    try writer.writeInt(2, 6); // B
+    try writer.writeInt(3, 6); // C
+    try writer.writeInt(0, 6); // @
+    try writer.writeInt(0, 6); // @
+    try writer.writeInt(0, 6); // @
+    try writer.writeInt(0, 6); // @
 
-    var buf: [20]u8 = undefined;
-    const call_sign = msg5.getCallSign(&buf);
-    try std.testing.expectEqualStrings("ABC", call_sign);
+    // VesselName: "ZIG" -> 26, 9, 7
+    try writer.writeInt(26, 6); // Z
+    try writer.writeInt(9, 6); // I
+    try writer.writeInt(7, 6); // G
+    // Fill rest of 120 bits (17 chars) with 0
+    for (0..17) |_| {
+         try writer.writeInt(0, 6);
+    }
 
-    // Set Vessel Name "ZIG"
-    // Z=26, I=9, G=7?
-    // A=1... Z=26.
-    // I: A=1, B=2, C=3, D=4, E=5, F=6, G=7, H=8, I=9. Correct.
-    // G: 7.
-    var vn: u120 = 0;
-    vn |= @as(u120, 26) << (114); // Z (20 chars * 6 = 120. First char is bits 114..119?)
-    // 120 bits. Char 0: 114..119.
-    vn |= @as(u120, 9) << (108); // I
-    vn |= @as(u120, 7) << (102); // G
-    msg5.vessel_name = vn;
+    // Rest of fields... fill with 0 to meet 424 bits length requirement?
+    // Current bit count: 6+2+30+2+30 + 42 + 120 = 232.
+    // Need 424.
+    const remaining = 424 - 232;
+    for (0..remaining) |_| {
+        try writer.bits.append(writer.allocator, 0);
+    }
 
-    const name = msg5.getVesselName(&buf);
-    try std.testing.expectEqualStrings("ZIG", name);
+    const bits_slice = try writer.bits.toOwnedSlice(std.testing.allocator);
+    defer std.testing.allocator.free(bits_slice);
+
+    const message = try ais.decode(bits_slice);
+
+    switch (message) {
+        .type5 => |msg| {
+            try std.testing.expectEqualStrings("ABC", msg.call_sign.value.constSlice());
+            try std.testing.expectEqualStrings("ZIG", msg.vessel_name.value.constSlice());
+        },
+        else => return error.WrongMessageType,
+    }
+}
+
+test "Round-trip Encoding" {
+    // Decode -> Encode -> Decode -> Compare
+    // Use the Type 1 sample from previous test.
+    const input = "\\s:source*54\\!AIVDM,1,1,,B,15MwkT1P37G?fl0EJbR0OwT0@MS,0*0E";
+    const result = try tag_block.parse(input);
+    const frame = try nmea.NmeaFrame.parse(std.testing.allocator, result.rest);
+    defer frame.deinit(std.testing.allocator);
+
+    var bits: [1024]u1 = undefined;
+    const bit_count = try sixbit.unarmor(frame.payload, &bits);
+    const original_bits = bits[0..bit_count];
+
+    const msg1 = try ais.decode(original_bits);
+
+    // Encode back
+    const encoded_bits = try ais.encode(msg1, std.testing.allocator);
+    defer std.testing.allocator.free(encoded_bits);
+
+    // Compare bits
+    // Note: The original stream might have padding or length differences if our structs
+    // force fixed sizes (e.g. 168 bits) but input was short/padded.
+    // The previous implementation handled padding.
+    // The generic decoder reads exactly the struct size.
+    // So if original_bits had extra padding, they won't be in encoded_bits.
+    // Or if original was short, decoder might have failed (but we added padding logic).
+    // Let's compare the relevant length.
+
+    // MsgType1 is 168 bits.
+    // const len = @min(original_bits.len, encoded_bits.len);
+    // Actually we expect exact match for defined fields.
+    // Let's just check if it decodes back to same values.
+
+    const msg2 = try ais.decode(encoded_bits);
+
+    switch (msg1) {
+        .type1 => |m1| {
+            switch (msg2) {
+                .type1 => |m2| {
+                    try std.testing.expectEqual(m1.mmsi.value, m2.mmsi.value);
+                    try std.testing.expectEqual(m1.latitude.value, m2.latitude.value);
+                },
+                else => return error.WrongMessageType,
+            }
+        },
+        else => return error.WrongMessageType,
+    }
 }
