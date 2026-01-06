@@ -1,37 +1,47 @@
 const std = @import("std");
 
-// Note: Using the Wrapper pattern requested.
-// Types are structs containing metadata and a single field `_` holding the value.
+// Schema types (Metadata only).
+// These types are used in the "Schema" struct to define encoding rules.
+// They do NOT hold values.
 
-/// Unsigned Integer Type
+/// Unsigned Integer Schema
 pub fn U(comptime width: usize, comptime T: type) type {
     return struct {
-        _: T,
         pub const bits = width;
         pub const signed = false;
         pub const Underlying = T;
     };
 }
 
-/// Signed Integer Type
+/// Signed Integer Schema
 pub fn I(comptime width: usize, comptime T: type) type {
     return struct {
-        _: T,
         pub const bits = width;
         pub const signed = true;
         pub const Underlying = T;
     };
 }
 
-/// Coordinate (Latitude/Longitude)
+/// Coordinate Schema
 pub fn LatLon(comptime width: usize) type {
     return struct {
-        _: f64,
         pub const bits = width;
         pub const scale = 600000.0;
         pub const Underlying = f64;
     };
 }
+
+/// String Schema
+pub fn Str(comptime bit_len: usize) type {
+    const char_count = bit_len / 6;
+    return struct {
+        pub const bits = bit_len;
+        pub const is_string = true;
+        pub const Underlying = BoundedArray(u8, char_count);
+    };
+}
+
+// Value Types (Runtime storage)
 
 /// Simple Bounded Array implementation since std.BoundedArray is missing in this env
 pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
@@ -64,20 +74,7 @@ pub fn BoundedArray(comptime T: type, comptime capacity: usize) type {
     };
 }
 
-/// AIS String
-pub fn Str(comptime bit_len: usize) type {
-    const char_count = bit_len / 6;
-    return struct {
-        _: BoundedArray(u8, char_count),
-        pub const bits = bit_len;
-        pub const is_string = true;
-        pub const Underlying = BoundedArray(u8, char_count);
-    };
-}
-
 test "Types compilation" {
     const TypeU = U(6, u8);
-    const u = TypeU{ ._ = 10 };
-    try std.testing.expectEqual(@as(u8, 10), u._);
     try std.testing.expect(TypeU.bits == 6);
 }
