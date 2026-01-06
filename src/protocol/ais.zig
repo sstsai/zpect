@@ -31,7 +31,7 @@ pub fn decode(bits: []const u1) !AisMessage {
             @memcpy(padded_bits[0..copy_len], bits[0..copy_len]);
 
             var padded_reader = bit_stream.BitReader{ .bits = &padded_bits };
-            return AisMessage{ .type1 = try codec.decodeStruct(MsgType1, &padded_reader) };
+            return AisMessage{ .type1 = try codec.decodeStruct(type_1.MsgType1Schema, type_1.MsgType1, &padded_reader) };
         },
         5 => {
             var padded_bits: [424]u1 = [_]u1{0} ** 424;
@@ -39,7 +39,7 @@ pub fn decode(bits: []const u1) !AisMessage {
             @memcpy(padded_bits[0..copy_len], bits[0..copy_len]);
 
             var padded_reader = bit_stream.BitReader{ .bits = &padded_bits };
-            return AisMessage{ .type5 = try codec.decodeStruct(MsgType5, &padded_reader) };
+            return AisMessage{ .type5 = try codec.decodeStruct(type_5.MsgType5Schema, type_5.MsgType5, &padded_reader) };
         },
         else => return error.UnsupportedMessage,
     }
@@ -50,8 +50,8 @@ pub fn encode(message: AisMessage, allocator: std.mem.Allocator) ![]const u1 {
     errdefer writer.deinit();
 
     switch (message) {
-        .type1 => |msg| try codec.encodeStruct(msg, &writer),
-        .type5 => |msg| try codec.encodeStruct(msg, &writer),
+        .type1 => |msg| try codec.encodeStruct(type_1.MsgType1Schema, msg, &writer),
+        .type5 => |msg| try codec.encodeStruct(type_5.MsgType5Schema, msg, &writer),
     }
 
     return try writer.bits.toOwnedSlice(allocator);

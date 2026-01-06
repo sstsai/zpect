@@ -72,6 +72,9 @@ pub fn Str(comptime bit_len: usize) type {
     };
 }
 
+// GenerateStruct removed due to @Type unavailability in current env.
+// We will manually define the Value struct and the Schema struct.
+
 test "Types compilation" {
     const TypeU = U(6, u8);
     const u = TypeU{ .value = 10 };

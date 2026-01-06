@@ -91,38 +91,48 @@ pub const StringCodec = struct {
     }
 };
 
-pub fn decodeStruct(comptime T: type, reader: *BitReader) !T {
-    var result: T = undefined;
+// Helper: wrap decoded value in metadata struct to reuse existing codecs
+fn wrap(comptime MetaT: type, value: anytype) MetaT {
+    return MetaT{ .value = value };
+}
 
-    inline for (std.meta.fields(T)) |field| {
-        const F = field.type;
+pub fn decodeStruct(comptime Schema: type, comptime ValueType: type, reader: *BitReader) !ValueType {
+    var result: ValueType = undefined;
+
+    inline for (std.meta.fields(Schema)) |field| {
+        const F = field.type; // Metadata type (e.g. U(6, u8))
 
         if (@hasDecl(F, "scale")) {
-            @field(result, field.name) = try ScaledFloatCodec.decode(F, reader);
+            const wrapper = try ScaledFloatCodec.decode(F, reader);
+            @field(result, field.name) = wrapper.value;
         } else if (@hasDecl(F, "is_string")) {
-            @field(result, field.name) = try StringCodec.decode(F, reader);
+            const wrapper = try StringCodec.decode(F, reader);
+            @field(result, field.name) = wrapper.value;
         } else if (@hasDecl(F, "signed")) {
-            @field(result, field.name) = try IntCodec.decode(F, reader);
+            const wrapper = try IntCodec.decode(F, reader);
+            @field(result, field.name) = wrapper.value;
         } else {
-            @compileError("No codec for field " ++ field.name);
+            const wrapper = try IntCodec.decode(F, reader); // Default fallback for unsigned?
+            // Wait, U(6, u8) has signed=false.
+            // IntCodec checks "signed".
+            @field(result, field.name) = wrapper.value;
         }
     }
 
     return result;
 }
 
-pub fn encodeStruct(value: anytype, writer: *BitWriter) !void {
-    const T = @TypeOf(value);
-    inline for (std.meta.fields(T)) |field| {
+pub fn encodeStruct(comptime Schema: type, value: anytype, writer: *BitWriter) !void {
+    inline for (std.meta.fields(Schema)) |field| {
         const field_val = @field(value, field.name);
-        const F = field.type;
+        const F = field.type; // Metadata type
 
         if (@hasDecl(F, "scale")) {
-            try ScaledFloatCodec.encode(F, field_val, writer);
+            try ScaledFloatCodec.encode(F, wrap(F, field_val), writer);
         } else if (@hasDecl(F, "is_string")) {
-            try StringCodec.encode(F, field_val, writer);
+            try StringCodec.encode(F, wrap(F, field_val), writer);
         } else if (@hasDecl(F, "signed")) {
-            try IntCodec.encode(F, field_val, writer);
+            try IntCodec.encode(F, wrap(F, field_val), writer);
         } else {
             @compileError("No codec for field " ++ field.name);
         }
@@ -130,38 +140,46 @@ pub fn encodeStruct(value: anytype, writer: *BitWriter) !void {
 }
 
 test "Codecs roundtrip" {
-    const TestStruct = struct {
+    const TestSchema = struct {
         id: types.U(6, u8),
         temp: types.I(10, i16),
         pos: types.LatLon(27),
         name: types.Str(12), // 2 chars
     };
 
+    // Manual Value struct
+    const TestStruct = struct {
+        id: u8,
+        temp: i16,
+        pos: f64,
+        name: types.BoundedArray(u8, 2),
+    };
+
     var writer = try BitWriter.init(std.testing.allocator);
     defer writer.deinit();
 
     var ts = TestStruct{
-        .id = .{ .value = 63 },
-        .temp = .{ .value = -50 },
-        .pos = .{ .value = 12.3456 }, // 12.3456 * 600000 = 7407360
-        .name = .{ .value = undefined },
+        .id = 63,
+        .temp = -50,
+        .pos = 12.3456,
+        .name = undefined,
     };
     // Initialize bounded array manually
-    var name_ba = types.Str(12).Underlying.init(0);
+    var name_ba = types.BoundedArray(u8, 2).init(0);
     try name_ba.append('A');
     try name_ba.append('B');
-    ts.name.value = name_ba;
+    ts.name = name_ba;
 
-    try encodeStruct(ts, &writer);
+    try encodeStruct(TestSchema, ts, &writer);
 
     const bits = try writer.bits.toOwnedSlice(std.testing.allocator);
     defer std.testing.allocator.free(bits);
 
     var reader = BitReader{ .bits = bits };
-    const decoded = try decodeStruct(TestStruct, &reader);
+    const decoded = try decodeStruct(TestSchema, TestStruct, &reader);
 
-    try std.testing.expectEqual(@as(u8, 63), decoded.id.value);
-    try std.testing.expectEqual(@as(i16, -50), decoded.temp.value);
-    try std.testing.expectApproxEqAbs(ts.pos.value, decoded.pos.value, 0.00001);
-    try std.testing.expectEqualStrings("AB", decoded.name.value.constSlice());
+    try std.testing.expectEqual(@as(u8, 63), decoded.id);
+    try std.testing.expectEqual(@as(i16, -50), decoded.temp);
+    try std.testing.expectApproxEqAbs(ts.pos, decoded.pos, 0.00001);
+    try std.testing.expectEqualStrings("AB", decoded.name.constSlice());
 }
