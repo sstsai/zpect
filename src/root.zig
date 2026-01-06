@@ -1,11 +1,8 @@
 //! By convention, root.zig is the root source file when making a package.
 const std = @import("std");
 
-pub const io = struct {
-    pub const gateway = @import("io/gateway.zig");
-};
-
 pub const protocol = struct {
+    pub const tag_block = @import("protocol/tag_block.zig");
     pub const nmea = @import("protocol/nmea.zig");
     pub const sixbit = @import("protocol/sixbit.zig");
     pub const ais = @import("protocol/ais.zig");
@@ -20,6 +17,7 @@ test "basic add functionality" {
 }
 
 test "protocol modules" {
+    _ = protocol.tag_block;
     _ = protocol.nmea;
     _ = protocol.sixbit;
     _ = protocol.ais;

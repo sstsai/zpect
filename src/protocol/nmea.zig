@@ -1,81 +1,98 @@
 const std = @import("std");
 
 pub const NmeaFrame = struct {
-    total_parts: u8,
-    part_number: u8,
+    sentence_type: []const u8, // e.g. "AIVDM", "GPGGA"
+    total_parts: ?u8,
+    part_number: ?u8,
     channel: ?u8,
-    payload: []const u8,
+    payload: []const u8, // For AIVDM
+    raw_fields: [][]const u8, // All fields for generic access
 
-    pub fn parse(line: []const u8) !NmeaFrame {
+    // We allocate raw_fields if needed or just use iterator internally?
+    // Let's keep it simple: specific parser for AIVDM, general for others.
+
+    // For this task, we focus on AIVDM.
+
+    pub fn parse(allocator: std.mem.Allocator, line: []const u8) !NmeaFrame {
+        // Validate checksum
         if (!validateChecksum(line)) {
             return error.InvalidChecksum;
         }
 
-        var it = std.mem.splitScalar(u8, line, ',');
+        // Find start ($ or !)
+        const start = std.mem.indexOfAny(u8, line, "!$") orelse return error.InvalidFormat;
+        const end = std.mem.lastIndexOfScalar(u8, line, '*') orelse return error.InvalidFormat;
 
-        // !AIVDM
-        const header = it.next() orelse return error.InvalidFormat;
-        if (!std.mem.eql(u8, header, "!AIVDM")) {
-            return error.InvalidFormat;
+        const content = line[start+1..end];
+
+        // Split into fields
+        // Note: std.ArrayList(T).init(allocator) seems missing in this Zig version for Aligned/ArrayList?
+        // Using initCapacity(allocator, 0) works or just manual init.
+        // Actually, ArrayList.init might have been removed in favor of ArrayList.init(allocator)
+        // Wait, I saw init(gpa: Allocator) at line 44, but that was for Unmanaged? Or something else?
+        // The error says "struct ... has no member named 'init'".
+        // But grep showed it.
+        // Ah, grep showed it at line 44. But Aligned struct starts at 576.
+        // So Aligned (which ArrayList uses) does NOT have init?
+        // It has initCapacity.
+        // Let's use initCapacity(allocator, 8) as a guess.
+
+        var fields = try std.ArrayList([]const u8).initCapacity(allocator, 8);
+        errdefer fields.deinit(allocator);
+
+        var it = std.mem.splitScalar(u8, content, ',');
+        while (it.next()) |field| {
+            // It seems append now requires allocator?
+            // "pub fn append(self: *Self, gpa: Allocator, item: T)"
+            // Zig Master change: ArrayList is likely Unmanaged wrapper or simply decoupled from allocator storage?
+            // If I used initCapacity, I passed allocator. But maybe it doesn't store it?
+            // Yes, ArrayList in this version seems to not store the allocator?
+            // Wait, if it doesn't store allocator, then I must pass it.
+            try fields.append(allocator, field);
         }
 
-        // Total parts
-        const total_parts_str = it.next() orelse return error.InvalidFormat;
-        const total_parts = try std.fmt.parseInt(u8, total_parts_str, 10);
+        if (fields.items.len == 0) return error.InvalidFormat;
 
-        // Part number
-        const part_number_str = it.next() orelse return error.InvalidFormat;
-        const part_number = try std.fmt.parseInt(u8, part_number_str, 10);
+        const sentence_type = fields.items[0];
 
-        // Message ID (sequential message ID), can be empty
-        _ = it.next();
+        // Check if AIVDM
+        if (std.mem.eql(u8, sentence_type, "AIVDM") or std.mem.eql(u8, sentence_type, "AIVDO")) {
+            if (fields.items.len < 6) return error.InvalidFormat;
 
-        // Channel code, can be empty
-        const channel_str = it.next() orelse return error.InvalidFormat;
-        var channel: ?u8 = null;
-        if (channel_str.len > 0) {
-            channel = channel_str[0];
+            const total_parts = std.fmt.parseInt(u8, fields.items[1], 10) catch 0;
+            const part_number = std.fmt.parseInt(u8, fields.items[2], 10) catch 0;
+            const channel_str = fields.items[4];
+            const channel = if (channel_str.len > 0) channel_str[0] else null;
+            const payload = fields.items[5];
+
+            return NmeaFrame{
+                .sentence_type = sentence_type,
+                .total_parts = total_parts,
+                .part_number = part_number,
+                .channel = channel,
+                .payload = payload,
+                .raw_fields = try fields.toOwnedSlice(allocator),
+            };
         }
 
-        // Payload
-        const payload = it.next() orelse return error.InvalidFormat;
-
-        // Fill bits (padding), check for * checksum delimiter
-        const fill_bits_part = it.next() orelse return error.InvalidFormat;
-        // The fill bits are actually before the *, e.g. ",0*4E"
-        // But splitScalar(',') splits by comma.
-        // Example: !AIVDM,1,1,,B,15MwkT1P37G?fl0EJbR0OwT0@MS,0*4E
-        // 1: !AIVDM
-        // 2: 1
-        // 3: 1
-        // 4: (empty)
-        // 5: B
-        // 6: 15MwkT1P37G?fl0EJbR0OwT0@MS
-        // 7: 0*4E
-
-        // So payload is valid.
-        // We verify the checksum earlier so we assume structure is somewhat correct.
-
-        // The "fill bits" is the first char of the last part before *
-        if (fill_bits_part.len < 3 or fill_bits_part[1] != '*') {
-             // 0*4E -> len 4. index 1 is *.
-             // Maybe it's just '0' if there is no checksum in the split?
-             // No, split includes everything.
-             // If we split by comma, the last part is "0*4E".
-             // fill bits is '0'.
-        }
-
+        // Generic NMEA
         return NmeaFrame{
-            .total_parts = total_parts,
-            .part_number = part_number,
-            .channel = channel,
-            .payload = payload,
+            .sentence_type = sentence_type,
+            .total_parts = null,
+            .part_number = null,
+            .channel = null,
+            .payload = "",
+            .raw_fields = try fields.toOwnedSlice(allocator),
         };
     }
 
+    pub fn deinit(self: NmeaFrame, allocator: std.mem.Allocator) void {
+        allocator.free(self.raw_fields);
+    }
+
     pub fn validateChecksum(line: []const u8) bool {
-        // Find start ! and end *
-        const start = std.mem.indexOfScalar(u8, line, '!') orelse return false;
+        // Find start ! or $ and end *
+        const start = std.mem.indexOfAny(u8, line, "!$") orelse return false;
         const end = std.mem.lastIndexOfScalar(u8, line, '*') orelse return false;
 
         if (end <= start) return false;
@@ -88,15 +105,6 @@ pub const NmeaFrame = struct {
 
         const checksum_hex = line[end+1..end+3];
         const expected = std.fmt.parseInt(u8, checksum_hex, 16) catch return false;
-
-        // If validation fails for the specific sample provided in the task, we allow it if it matches 0xE calculated but 0x4E expected.
-        // This is a workaround for what appears to be an invalid sample checksum in the prompt, or a misunderstanding of the sample.
-        // Calculated: 0xE. Expected: 0x4E.
-        // Actually, let's just bypass checksum for the test if it fails, or fix the sample in the test if allowed.
-        // But the prompt says "Verify it decodes...".
-        // I will trust my calculation and maybe the sample in the prompt has a typo.
-        // 4E vs 0E. Bit 6 flipped.
-        // 0x40 is '@'.
 
         return sum == expected;
     }
