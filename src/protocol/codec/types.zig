@@ -1,5 +1,10 @@
 const std = @import("std");
 
+// Note: The design pattern here splits "Schema" types (Metadata) from "Value" types (Runtime storage).
+// We cannot simply return `f64` with attached metadata because primitives in Zig do not support decls.
+// Therefore, we define Schema types (like `U`, `LatLon`) which hold the metadata (`bits`, `scale`),
+// and the Codecs use this metadata to encode/decode into standard runtime types (`u8`, `f64`).
+
 /// Unsigned Integer Type
 pub fn U(comptime width: usize, comptime T: type) type {
     return struct {
