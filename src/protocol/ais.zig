@@ -17,6 +17,20 @@ pub const MsgType1 = packed struct {
     spare: u3,
     raim: u1,
     radio_status: u19,
+
+    /// Returns longitude in degrees.
+    /// Internal representation: 1/10000 minute, signed 28-bit.
+    pub fn getLongitude(self: MsgType1) f64 {
+        const val = @as(i28, @bitCast(self.longitude));
+        return @as(f64, @floatFromInt(val)) / 10000.0 / 60.0;
+    }
+
+    /// Returns latitude in degrees.
+    /// Internal representation: 1/10000 minute, signed 27-bit.
+    pub fn getLatitude(self: MsgType1) f64 {
+        const val = @as(i27, @bitCast(self.latitude));
+        return @as(f64, @floatFromInt(val)) / 10000.0 / 60.0;
+    }
 }; // 168 bits
 
 pub const MsgType5 = packed struct {
@@ -38,12 +52,60 @@ pub const MsgType5 = packed struct {
     destination: u120,
     dte: u1,
     spare: u1,
+
+    pub fn getCallSign(self: MsgType5, buffer: []u8) []const u8 {
+        return decodeString(u42, self.call_sign, buffer);
+    }
+
+    pub fn getVesselName(self: MsgType5, buffer: []u8) []const u8 {
+        return decodeString(u120, self.vessel_name, buffer);
+    }
 }; // 424 bits
 
 pub const AisMessage = union(enum) {
     type1: MsgType1,
     type5: MsgType5,
 };
+
+// Helper to decode 6-bit ASCII string packed in integer.
+// 6-bit ASCII mapping (Table 44 in ITU-R M.1371):
+// 0-31: @, A-Z, [, \, ], ^, _
+// 32-63: space, !, ", #, ..., ?
+fn decodeString(comptime T: type, value: T, buffer: []u8) []const u8 {
+    const bit_len = @bitSizeOf(T);
+    const char_count = bit_len / 6;
+    if (buffer.len < char_count) return "";
+
+    // The packed integer `value` has characters packed.
+    // Which order?
+    // "Strings are sent MSB first."
+    // Our `castBits` constructed the integer MSB first.
+    // So the most significant 6 bits of `value` correspond to the FIRST character.
+    // e.g. "ABC" -> A(MSB)..C(LSB).
+
+    var idx: usize = 0;
+    for (0..char_count) |i| {
+        // Shift to get the i-th character from MSB.
+        // i=0 -> shift right by (N-1)*6
+        const shift = (char_count - 1 - i) * 6;
+        const char_code = @as(u8, @truncate(value >> @intCast(shift))) & 0x3F;
+
+        // Map 6-bit code to ASCII
+        const ascii = if (char_code < 32) (char_code + 64) else (char_code);
+
+        // Strip trailing @ (which is padding) usually?
+        // Spec says "@" (0) is used for padding.
+        // But usually we convert all and trim?
+        // Let's convert all.
+
+        buffer[idx] = ascii;
+        idx += 1;
+    }
+
+    // Trim trailing '@' (padding) and spaces
+    const full = buffer[0..idx];
+    return std.mem.trimEnd(u8, full, "@ ");
+}
 
 pub fn decode(bits: []const u1) !AisMessage {
     if (bits.len < 6) return error.MessageTooShort;

@@ -44,12 +44,8 @@ pub const NmeaFrame = struct {
 
         var it = std.mem.splitScalar(u8, content, ',');
         while (it.next()) |field| {
-            // It seems append now requires allocator?
-            // "pub fn append(self: *Self, gpa: Allocator, item: T)"
-            // Zig Master change: ArrayList is likely Unmanaged wrapper or simply decoupled from allocator storage?
-            // If I used initCapacity, I passed allocator. But maybe it doesn't store it?
-            // Yes, ArrayList in this version seems to not store the allocator?
-            // Wait, if it doesn't store allocator, then I must pass it.
+            // Note: In this Zig Master version, std.ArrayList is effectively unmanaged and requires
+            // the allocator to be passed to methods like append/deinit.
             try fields.append(allocator, field);
         }
 
