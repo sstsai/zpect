@@ -36,10 +36,10 @@ test "pipeline with tag block and AIS" {
     switch (message) {
         .type1 => |msg| {
              // 366998416
-             try std.testing.expectEqual(@as(u32, 366998416), msg.mmsi);
+             try std.testing.expectEqual(@as(u32, 366998416), msg.mmsi._);
              // Coordinates
-             const lat = msg.latitude;
-             const lon = msg.longitude;
+             const lat = msg.latitude._;
+             const lon = msg.longitude._;
              // Just verify they are reasonable floating point numbers (not NaN)
              try std.testing.expect(!std.math.isNan(lat));
              try std.testing.expect(!std.math.isNan(lon));
@@ -92,8 +92,8 @@ test "AIS Type 5 semantic access (Mock)" {
 
     switch (message) {
         .type5 => |msg| {
-            try std.testing.expectEqualStrings("ABC", msg.call_sign.constSlice());
-            try std.testing.expectEqualStrings("ZIG", msg.vessel_name.constSlice());
+            try std.testing.expectEqualStrings("ABC", msg.call_sign._.constSlice());
+            try std.testing.expectEqualStrings("ZIG", msg.vessel_name._.constSlice());
         },
         else => return error.WrongMessageType,
     }
@@ -122,8 +122,8 @@ test "Round-trip Encoding" {
         .type1 => |m1| {
             switch (msg2) {
                 .type1 => |m2| {
-                    try std.testing.expectEqual(m1.mmsi, m2.mmsi);
-                    try std.testing.expectEqual(m1.latitude, m2.latitude);
+                    try std.testing.expectEqual(m1.mmsi._, m2.mmsi._);
+                    try std.testing.expectEqual(m1.latitude._, m2.latitude._);
                 },
                 else => return error.WrongMessageType,
             }
