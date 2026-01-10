@@ -1,121 +1,159 @@
 const std = @import("std");
 
-/// Physical Dimensions / Categories
-pub const Category = enum {
-    // SI Base Dimensions
-    Length,
-    Mass,
-    Time,
-    ElectricCurrent,
-    ThermodynamicTemperature,
-    AmountOfSubstance,
-    LuminousIntensity,
+/// Represents the exponents of the 7 SI base quantities + Angle.
+/// Used for Dimensional Analysis.
+pub const Dimensions = struct {
+    length: i8 = 0,
+    mass: i8 = 0,
+    time: i8 = 0,
+    current: i8 = 0,
+    temperature: i8 = 0,
+    amount: i8 = 0,
+    luminous: i8 = 0,
+    angle: i8 = 0, // Treated as a dimension for safety in maritime context
 
-    // Derived / Common Dimensions
-    Angle,
-    Speed,
-    AngularVelocity,
-    Frequency,
-    Pressure,
-    Voltage,
-    Ratio,
+    pub fn eq(a: Dimensions, b: Dimensions) bool {
+        return a.length == b.length and
+               a.mass == b.mass and
+               a.time == b.time and
+               a.current == b.current and
+               a.temperature == b.temperature and
+               a.amount == b.amount and
+               a.luminous == b.luminous and
+               a.angle == b.angle;
+    }
+
+    pub fn mul(a: Dimensions, b: Dimensions) Dimensions {
+        return .{
+            .length = a.length + b.length,
+            .mass = a.mass + b.mass,
+            .time = a.time + b.time,
+            .current = a.current + b.current,
+            .temperature = a.temperature + b.temperature,
+            .amount = a.amount + b.amount,
+            .luminous = a.luminous + b.luminous,
+            .angle = a.angle + b.angle,
+        };
+    }
+
+    pub fn div(a: Dimensions, b: Dimensions) Dimensions {
+        return .{
+            .length = a.length - b.length,
+            .mass = a.mass - b.mass,
+            .time = a.time - b.time,
+            .current = a.current - b.current,
+            .temperature = a.temperature - b.temperature,
+            .amount = a.amount - b.amount,
+            .luminous = a.luminous - b.luminous,
+            .angle = a.angle - b.angle,
+        };
+    }
 };
 
-/// Helper to create a distinct Unit type.
-/// Each unit is a type that carries its definition as compile-time constants.
+/// Represents a scalar conversion factor as a Ratio.
+/// Uses f64 to allow representing irrational constants like Pi (for Degrees).
+pub const Ratio = struct {
+    num: f64,
+    den: f64,
+
+    pub fn value(self: Ratio) f64 {
+        return self.num / self.den;
+    }
+};
+
+/// Base Dimensions
+pub const Dim_Length = Dimensions{ .length = 1 };
+pub const Dim_Mass   = Dimensions{ .mass = 1 };
+pub const Dim_Time   = Dimensions{ .time = 1 };
+pub const Dim_Angle  = Dimensions{ .angle = 1 };
+pub const Dim_Temp   = Dimensions{ .temperature = 1 };
+pub const Dim_Freq   = Dimensions{ .time = -1 };
+pub const Dim_Speed  = Dim_Length.div(Dim_Time);
+
+/// Defines a Unit with a Dimension and a Scale relative to the Base Unit.
+/// The Base Unit for a dimension has scale 1.0 (1/1).
 fn DefineUnit(
-    comptime cat: Category,
-    comptime scale_val: f64,
+    comptime dim: Dimensions,
+    comptime scale_ratio: Ratio,
     comptime name_str: []const u8,
     comptime symbol_str: []const u8
 ) type {
     return struct {
-        pub const category = cat;
-        pub const scale = scale_val;
+        pub const dimension = dim;
+        pub const scale = scale_ratio;
         pub const name = name_str;
         pub const symbol = symbol_str;
     };
 }
 
 // ============================================================================
-// SI Base Units
+// Base Units (Scale 1/1)
 // ============================================================================
 
-pub const Meter    = DefineUnit(.Length,                   1.0, "Meter",    "m");
-pub const Kilogram = DefineUnit(.Mass,                     1.0, "Kilogram", "kg");
-pub const Second   = DefineUnit(.Time,                     1.0, "Second",   "s");
-pub const Ampere   = DefineUnit(.ElectricCurrent,          1.0, "Ampere",   "A");
-pub const Kelvin   = DefineUnit(.ThermodynamicTemperature, 1.0, "Kelvin",   "K");
-pub const Mole     = DefineUnit(.AmountOfSubstance,        1.0, "Mole",     "mol");
-pub const Candela  = DefineUnit(.LuminousIntensity,        1.0, "Candela",  "cd");
+pub const Meter  = DefineUnit(Dim_Length, .{ .num = 1, .den = 1 }, "Meter", "m");
+pub const Second = DefineUnit(Dim_Time,   .{ .num = 1, .den = 1 }, "Second", "s");
+pub const Radian = DefineUnit(Dim_Angle,  .{ .num = 1, .den = 1 }, "Radian", "rad");
+pub const Kelvin = DefineUnit(Dim_Temp,   .{ .num = 1, .den = 1 }, "Kelvin", "K");
 
 // ============================================================================
-// Common Derived & Domain-Specific Units
+// Derived Units
 // ============================================================================
 
-// Angle (Base: Radian usually, but some consider it dimensionless)
-pub const Radian = DefineUnit(.Angle, 1.0, "Radian", "rad");
-pub const Degree = DefineUnit(.Angle, std.math.pi / 180.0, "Degree", "deg");
+// Speed
+pub const MetersPerSecond = DefineUnit(Dim_Speed, .{ .num = 1, .den = 1 }, "Meters Per Second", "m/s");
+// 1 Knot = 1852 meters / 3600 seconds
+pub const Knot = DefineUnit(Dim_Speed, .{ .num = 1852, .den = 3600 }, "Knot", "kn");
+// 1 km/h = 1000 meters / 3600 seconds
+pub const KilometersPerHour = DefineUnit(Dim_Speed, .{ .num = 1000, .den = 3600 }, "Kilometers Per Hour", "km/h");
 
-// Speed (Base: Meters per Second)
-pub const MetersPerSecond = DefineUnit(.Speed, 1.0,      "Meters Per Second", "m/s");
-pub const Knot            = DefineUnit(.Speed, 0.514444, "Knot",              "kn");
-pub const KilometersPerHour = DefineUnit(.Speed, 0.277778, "Kilometers Per Hour", "km/h");
+// Angle
+// 1 Degree = Pi / 180 Radians
+pub const Degree = DefineUnit(Dim_Angle, .{ .num = std.math.pi, .den = 180.0 }, "Degree", "deg");
 
-// Length Variants
-pub const Kilometer    = DefineUnit(.Length, 1000.0, "Kilometer",     "km");
-pub const NauticalMile = DefineUnit(.Length, 1852.0, "Nautical Mile", "NM");
+// Length
+pub const Kilometer    = DefineUnit(Dim_Length, .{ .num = 1000, .den = 1 }, "Kilometer", "km");
+pub const NauticalMile = DefineUnit(Dim_Length, .{ .num = 1852, .den = 1 }, "Nautical Mile", "NM");
 
-// Time Variants
-pub const Minute = DefineUnit(.Time, 60.0,   "Minute", "min");
-pub const Hour   = DefineUnit(.Time, 3600.0, "Hour",   "h");
+// Time
+pub const Minute = DefineUnit(Dim_Time, .{ .num = 60,   .den = 1 }, "Minute", "min");
+pub const Hour   = DefineUnit(Dim_Time, .{ .num = 3600, .den = 1 }, "Hour",   "h");
 
 // Frequency
-pub const Hertz = DefineUnit(.Frequency, 1.0, "Hertz", "Hz");
+pub const Hertz = DefineUnit(Dim_Freq, .{ .num = 1, .den = 1 }, "Hertz", "Hz");
 
-// Pressure
-pub const Pascal = DefineUnit(.Pressure, 1.0, "Pascal", "Pa");
-pub const Bar    = DefineUnit(.Pressure, 100000.0, "Bar", "bar");
-
-// Temperature Variants
-// Note: Celsius scale is 1.0 relative to Kelvin (interval), but has an offset.
-// This definition captures the scalar magnitude.
-pub const Celsius = DefineUnit(.ThermodynamicTemperature, 1.0, "Celsius", "°C");
 
 // ============================================================================
 // Wrapper
 // ============================================================================
 
 /// Wraps a Schema type with a Unit Type.
-///
-/// Usage:
-/// const Speed = Quantity(U(10, u16), Knot);
 pub fn Quantity(comptime Schema: type, comptime UnitType: type) type {
     return struct {
-        // Expose all declarations from the underlying Schema
         pub usingnamespace Schema;
-        // Add the unit type metadata
         pub const unit = UnitType;
     };
 }
 
-test "Quantity wrapper with distinct unit types" {
-    // Mock Schema
-    const U10 = struct {
-        pub const bits = 10;
-        pub const signed = false;
-        pub const Underlying = u16;
-    };
+test "Dimensional Analysis and Ratios" {
+    // Check Speed Dimension
+    const S = Dim_Speed;
+    try std.testing.expectEqual(1, S.length);
+    try std.testing.expectEqual(-1, S.time);
+    try std.testing.expectEqual(0, S.mass);
 
-    const ShipSpeed = Quantity(U10, Knot);
+    // Check Knot Scale
+    const k_scale = Knot.scale.value();
+    const expected = 1852.0 / 3600.0; // 0.514444...
+    try std.testing.expectApproxEqAbs(expected, k_scale, 0.000001);
 
-    try std.testing.expectEqual(10, ShipSpeed.bits);
-    try std.testing.expectEqual(Category.Speed, ShipSpeed.unit.category);
-    try std.testing.expectApproxEqAbs(0.514444, ShipSpeed.unit.scale, 0.000001);
-    try std.testing.expectEqualStrings("Knot", ShipSpeed.unit.name);
-    try std.testing.expectEqualStrings("kn", ShipSpeed.unit.symbol);
+    // Check Degree Scale
+    const d_scale = Degree.scale.value();
+    const rads = std.math.pi / 180.0;
+    try std.testing.expectApproxEqAbs(rads, d_scale, 0.0000001);
 
-    // Verify distinction
-    const CarSpeed = Quantity(U10, KilometersPerHour);
-    try std.testing.expect(ShipSpeed.unit != CarSpeed.unit);
+    // Wrapper check
+    const MockSchema = struct { pub const bits = 10; };
+    const Q = Quantity(MockSchema, Knot);
+    try std.testing.expectEqual(1, Q.unit.dimension.length);
+    try std.testing.expectEqual(-1, Q.unit.dimension.time);
 }
