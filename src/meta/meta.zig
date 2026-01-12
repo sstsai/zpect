@@ -10,54 +10,53 @@ pub const SI = struct {
     scale: ?quantity.Ratio = null,
 };
 
-// Mixin Generator for the fluent API
-fn SI_Fluent(comptime Rep: type, comptime metas: anytype) type {
-    return struct {
+//
+// 2. Meta: returns a complete strong type at every step
+//
+
+/// Entry point: wraps a representation type with empty metadata.
+pub fn Meta(comptime Rep: type) type {
+    return MetaInternal(Rep, .{});
+}
+
+fn MetaInternal(comptime Rep: type, comptime metas: anytype) type {
+
+    // Check if SI metadata is already present in the tuple
+    var si_val: ?SI = null;
+    inline for (metas) |m| {
+        if (@TypeOf(m) == SI) si_val = m;
+    }
+
+    // Define the Fluent API Mixin
+    // This captures `Rep` and `metas` from the `MetaInternal` scope.
+    const FluentMixin = struct {
         pub fn SI(comptime args: anytype) type {
             var si = SI{};
             const fields = std.meta.fields(@TypeOf(args));
             inline for (fields) |f| {
                 if (@hasField(SI, f.name)) {
                     @field(si, f.name) = @field(args, f.name);
+                } else {
+                    @compileError("SI metadata does not have field: '" ++ f.name ++ "'");
                 }
             }
+            // Recursively call MetaInternal with the new metadata appended
             return MetaInternal(Rep, metas ++ .{ si });
         }
     };
-}
 
-//
-// 2. Meta: returns a complete strong type at every step
-//
-
-/// Entry point: wraps a representation type with an empty metadata set.
-pub fn Meta(comptime Rep: type) type {
-    return MetaInternal(Rep, .{});
-}
-
-fn MetaInternal(comptime Rep: type, comptime metas: anytype) type {
     return struct {
         pub const rep = Rep;
         pub const meta = metas;
 
-        // Smart exposure: If SI metadata exists, expose it as `SI` constant.
-        // Otherwise, expose `SI` namespace (which contains the `SI` fluent method).
-        pub usingnamespace Expose(Rep, metas);
+        // Smart exposure:
+        // If SI metadata exists, expose it as `SI` constant.
+        // Otherwise, expose the FluentMixin (which contains the `SI` builder method).
+        pub usingnamespace if (si_val) |v|
+            struct { pub const SI = v; }
+        else
+            FluentMixin;
     };
-}
-
-fn Expose(comptime Rep: type, comptime metas: anytype) type {
-    var si_val: ?SI = null;
-    inline for (metas) |m| {
-        if (@TypeOf(m) == SI) si_val = m;
-    }
-
-    if (si_val) |v| {
-        return struct { pub const SI = v; };
-    } else {
-        // Expose the fluent method which captures Rep and metas context
-        return SI_Fluent(Rep, metas);
-    }
 }
 
 //
@@ -69,9 +68,7 @@ test "Meta SI usage" {
         Meta(f64)
             .SI(.{
                 .unit = "m/s",
-                // "Reads like an SI dim" - using standard Dimensions struct
                 .dim = quantity.Dim_Speed,
-                // "Scale is a ratio"
                 .scale = .{ .num = 1.0, .den = 1.0 },
             });
 
