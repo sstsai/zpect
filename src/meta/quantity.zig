@@ -125,6 +125,7 @@ pub const Hertz = DefineUnit(Dim_Freq, .{ .num = 1, .den = 1 }, "Hertz", "Hz");
 // ============================================================================
 // Wrapper
 // ============================================================================
+// Used by meta.zig for SI metadata
 
 /// Wraps a Schema type with a Unit Type.
 pub fn Quantity(comptime Schema: type, comptime UnitType: type) type {
